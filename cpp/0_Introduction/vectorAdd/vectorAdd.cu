@@ -39,6 +39,7 @@
 #include <ctime>
 #include <stdio.h>
 #include <cuda/cmath>
+#include <iostream>
 /**
  * CUDA Kernel Device code
  *
@@ -58,7 +59,7 @@ __global__ void vecAdd(float* A, float* B, float* C, int vectorLength)
 
 void initArray(float* A, int length)
 {
-     std::srand(std::time({}));
+    std::srand(std::time({}));
     for(int i=0; i<length; i++)
     {
         A[i] = rand() / (float)RAND_MAX;
@@ -115,10 +116,29 @@ int main(int argc, char** argv)
     // accessible to the GPU
     int threads = 256;
     int blocks = cuda::ceil_div(vectorLength, threads);
-    vecAdd<<<blocks, threads>>>(A, B, C, vectorLength);
-    // Wait for the kernel to complete execution
-    cudaDeviceSynchronize();
+    float averageTime = 0;
+    for (int i = 0; i < 300; ++i)
+    {
+        cudaEvent_t start, stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
 
+        cudaStream_t stream;
+        cudaStreamCreate(&stream);
+
+        cudaEventRecord(start, stream);
+        vecAdd<<<blocks, threads, 0, stream>>>(A, B, C, vectorLength);
+        cudaEventRecord(stop, stream);
+        cudaEventSynchronize(stop); 
+        // Wait for the kernel to complete execution
+        cudaDeviceSynchronize();
+
+        float timeWork;
+        cudaEventElapsedTime(&timeWork, start, stop);
+        averageTime += timeWork / 300;
+    }
+
+    std::cout << "time: " << averageTime << " ms" <<std::endl;
     // Perform computation serially on CPU for comparison
     serialVecAdd(A, B, comparisonResult, vectorLength);
 
@@ -138,7 +158,7 @@ int main(int argc, char** argv)
     cudaFree(C);
     free(comparisonResult);
 
-    //unified-memory-example-end	
+    //unified-memory-example-end
 
     return 0;
 }
