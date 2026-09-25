@@ -117,7 +117,8 @@ int main(int argc, char** argv)
     int threads = 256;
     int blocks = cuda::ceil_div(vectorLength, threads);
     float averageTime = 0;
-    for (int i = 0; i < 300; ++i)
+    int countExperements = 300;
+    for (int i = 0; i < countExperements; ++i)
     {
         cudaEvent_t start, stop;
         cudaEventCreate(&start);
@@ -135,10 +136,12 @@ int main(int argc, char** argv)
 
         float timeWork;
         cudaEventElapsedTime(&timeWork, start, stop);
-        averageTime += timeWork / 300;
+        averageTime += timeWork / countExperements;
     }
-
-    std::cout << "time: " << averageTime << " ms" <<std::endl;
+    double bytes = 3.0 * countExperements * sizeof(float);
+    double gbps  = bytes / (averageTime * 1e6);
+    std::cout << "time: " << averageTime << " ms" << std::endl;
+    std::cout << "bandwidth: " << gbps << " GB/s" << std::endl;
     // Perform computation serially on CPU for comparison
     serialVecAdd(A, B, comparisonResult, vectorLength);
 
