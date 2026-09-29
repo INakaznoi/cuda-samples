@@ -48,12 +48,14 @@
  */
 
 
-__global__ void vecAdd(float* A, float* B, float* C, int vectorLength)
+__global__ void vecAdd(float4* A, float4* B, float4* C, int vectorLength)
 {
     int workIndex = threadIdx.x + blockIdx.x*blockDim.x;
-    if(workIndex < vectorLength)
-    {
-        C[workIndex] = A[workIndex] + B[workIndex];
+    if(workIndex < vectorLength) {
+        C[workIndex].x = A[workIndex].x + B[workIndex].x;
+        C[workIndex].y = A[workIndex].y + B[workIndex].y;
+        C[workIndex].z = A[workIndex].z + B[workIndex].z;
+        C[workIndex].w = A[workIndex].w + B[workIndex].w;
     }
 }
 
@@ -89,11 +91,13 @@ bool vectorApproximatelyEqual(float* A, float* B, int length, float epsilon=0.00
 
 int main(int argc, char** argv)
 {
-    int vectorLength = 1024;
+    int vectorLengthReal = 1024;
     if(argc >=2)
     {
-        vectorLength = std::atoi(argv[1]);
+        vectorLengthReal = std::atoi(argv[1]);
     }
+    int vectorLengthSupple = (vectorLengthReal + 3) / 4 * 4;
+
 
     //unified-memory-example-begin
 
@@ -101,52 +105,58 @@ int main(int argc, char** argv)
     float* A = nullptr;
     float* B = nullptr;
     float* C = nullptr;
-    float* comparisonResult = (float*)malloc(vectorLength*sizeof(float));
+    float* comparisonResult = (float*)malloc(vectorLengthSupple*sizeof(float));
 
     // Use unified memory to allocate buffers
-    cudaMallocManaged(&A, vectorLength*sizeof(float));
-    cudaMallocManaged(&B, vectorLength*sizeof(float));
-    cudaMallocManaged(&C, vectorLength*sizeof(float));
+    cudaMallocManaged(&A, vectorLengthSupple*sizeof(float));
+    cudaMallocManaged(&B, vectorLengthSupple*sizeof(float));
+    cudaMallocManaged(&C, vectorLengthSupple*sizeof(float));
 
     // Initialize vectors on the host
-    initArray(A, vectorLength);
-    initArray(B, vectorLength);
+    initArray(A, vectorLengthSupple);
+    initArray(B, vectorLengthSupple);
 
     // Launch the kernel. Unified memory will make sure A, B, and C are
     // accessible to the GPU
     int threads = 256;
-    int blocks = cuda::ceil_div(vectorLength, threads);
+    int blocks = cuda::ceil_div(vectorLengthSupple / 4, threads);
     float averageTime = 0;
-    int countExperements = 300;
+    int countExperements = 100;
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+    float4* ACust = reinterpret_cast<float4*>(A);
+    float4* BCust = reinterpret_cast<float4*>(B);
+    float4* CCust = reinterpret_cast<float4*>(C);
     for (int i = 0; i < countExperements; ++i)
     {
         cudaEvent_t start, stop;
         cudaEventCreate(&start);
         cudaEventCreate(&stop);
 
-        cudaStream_t stream;
-        cudaStreamCreate(&stream);
 
         cudaEventRecord(start, stream);
-        vecAdd<<<blocks, threads, 0, stream>>>(A, B, C, vectorLength);
+        vecAdd<<<blocks, threads, 0, stream>>>(ACust, BCust, CCust, vectorLengthSupple / 4);
         cudaEventRecord(stop, stream);
-        cudaEventSynchronize(stop); 
+        cudaEventSynchronize(stop);
         // Wait for the kernel to complete execution
-        cudaDeviceSynchronize();
 
         float timeWork;
         cudaEventElapsedTime(&timeWork, start, stop);
         averageTime += timeWork / countExperements;
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
     }
-    double bytes = 3.0 * countExperements * sizeof(float);
+    cudaStreamDestroy(stream);
+    double bytes = 3.0 * vectorLengthReal * sizeof(float);
     double gbps  = bytes / (averageTime * 1e6);
     std::cout << "time: " << averageTime << " ms" << std::endl;
     std::cout << "bandwidth: " << gbps << " GB/s" << std::endl;
     // Perform computation serially on CPU for comparison
-    serialVecAdd(A, B, comparisonResult, vectorLength);
+    serialVecAdd(A, B, comparisonResult, vectorLengthReal);
 
     // Confirm that CPU and GPU got the same answer
-    if(vectorApproximatelyEqual(C, comparisonResult, vectorLength))
+    C = reinterpret_cast<float*>(CCust);
+    if(vectorApproximatelyEqual(C, comparisonResult, vectorLengthReal))
     {
         printf("Unified Memory: CPU and GPU answers match\n");
     }
